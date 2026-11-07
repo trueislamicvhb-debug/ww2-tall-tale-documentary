@@ -1,0 +1,22 @@
+{
+  "project": "WW2 Tall Tale Documentary",
+  "format": "16:9",
+  "resolution": "1920x1080",
+  "target_duration_minutes": 10,
+  "visual_style": "2D cut-out cartoon characters in 3D environments",
+  "chapters": [
+    "A WORLD ON THE EDGE",
+    "THE INVASION OF POLAND",
+    "EUROPE UNDER OCCUPATION",
+    "THE BATTLE OF BRITAIN",
+    "THE WAR EXPANDS EAST",
+    "PEARL HARBOR AND A GLOBAL WAR",
+    "THE TURNING POINTS",
+    "D-DAY AND THE ROAD TO BERLIN",
+    "THE PACIFIC WAR ENDS",
+    "A CHANGED WORLD"
+  ],
+  "narration_words": 1451,
+  "narration_lines": 70,
+  "rendering": "GitHub Actions; one-minute chunks; software WebGL"
+}

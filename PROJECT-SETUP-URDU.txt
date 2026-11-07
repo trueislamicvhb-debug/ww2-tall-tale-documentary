@@ -1,0 +1,16 @@
+WW2 DOCUMENTARY — MOBILE SETUP
+
+1) ZIP extract karo.
+2) github.com/new kholo.
+3) Repository name: ww2-tall-tale-documentary
+4) Public ya Private select karo. Create repository.
+5) Extracted project ke files GitHub mein upload karo. Nested folders ko unke same folder paths mein rakhna hai.
+6) .github/workflows/render.yml file bhi zaroor repository mein honi chahiye.
+7) Commit changes.
+8) Repository > Actions > Build WW2 Documentary > Run workflow.
+9) Pehli dafa render_mode = test select karo.
+10) Run complete hone par WW2-preview artifact download karke check karo.
+11) Preview theek ho to dobara workflow run karo aur render_mode = full select karo.
+12) Final artifact ka naam WW2-Documentary-1080p hoga.
+
+Note: Pehli run mein Kokoro voice aur Whisper models download honge. Full 10-minute video render karna heavy CPU task hai. Pehle test zaroor chalana.

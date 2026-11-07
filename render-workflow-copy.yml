@@ -1,0 +1,228 @@
+name: Build WW2 Documentary
+
+on:
+  workflow_dispatch:
+    inputs:
+      render_mode:
+        description: "Run a short preview first, or render the complete documentary"
+        required: true
+        type: choice
+        default: test
+        options:
+          - test
+          - full
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ww2-documentary-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare narration and timing
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    outputs:
+      mode: ${{ inputs.render_mode }}
+      parts: ${{ steps.duration.outputs.parts }}
+      duration: ${{ steps.duration.outputs.duration }}
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Cache voice and Whisper models
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.faceless-shorts/kokoro
+            ~/.cache/huggingface/hub
+          key: ww2-models-kokoro-whisper-v1
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy kokoro-onnx faster-whisper
+
+      - name: Generate English documentary narration
+        run: python scripts/voice.py .
+
+      - name: Align spoken words for captions
+        run: python scripts/words.py .
+
+      - name: Generate chapter sound cues and soundtrack
+        run: |
+          python scripts/make_cues.py .
+          python scripts/mix.py .
+
+      - name: Calculate render segments
+        id: duration
+        run: |
+          python - <<'PY'
+          import json, math
+          d = json.load(open("data/lines.json"))["duration"]
+          print(f"Narration duration: {d:.1f} seconds ({d/60:.2f} minutes)")
+          print(f"parts={json.dumps(list(range(math.ceil(d/60))))}")
+          print(f"duration={d:.3f}")
+          PY
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, math
+          d = json.load(open("data/lines.json"))["duration"]
+          print("parts=" + json.dumps(list(range(math.ceil(d/60)))))
+          print(f"duration={d:.3f}")
+          PY
+
+      - name: Upload prepared audio and timing
+        uses: actions/upload-artifact@v4
+        with:
+          name: ww2-prepared-data
+          path: |
+            data/narration.wav
+            data/lines.json
+            data/words.json
+            data/words.txt
+            data/cues.json
+            data/mix.wav
+          if-no-files-found: error
+          retention-days: 2
+
+  preview:
+    name: Render 20-second preview
+    needs: prepare
+    if: needs.prepare.outputs.mode == 'test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Set up Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          install-dependencies: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: ww2-prepared-data
+          path: data
+      - name: Render preview
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+          SOFTWARE_GL: "1"
+          QS: "&res=0.35&aa=0&shadow=512"
+          FPS: "12"
+        run: |
+          mkdir -p renders
+          node tools/capture.mjs video renders/WW2-preview.mp4 0 20 --draft
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WW2-preview
+          path: renders/WW2-preview.mp4
+          if-no-files-found: error
+          retention-days: 7
+
+  render_parts:
+    name: Render documentary part ${{ matrix.part }}
+    needs: prepare
+    if: needs.prepare.outputs.mode == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        part: ${{ fromJSON(needs.prepare.outputs.parts) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Set up Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          install-dependencies: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: ww2-prepared-data
+          path: data
+      - name: Render one minute segment
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+          SOFTWARE_GL: "1"
+          QS: "&res=0.45&aa=0&shadow=512"
+          FPS: "24"
+        run: |
+          mkdir -p renders
+          START=$(( ${{ matrix.part }} * 60 ))
+          END=$(( START + 60 ))
+          node tools/capture.mjs video "renders/part-${{ matrix.part }}.mp4" "$START" "$END"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ww2-part-${{ matrix.part }}
+          path: renders/part-${{ matrix.part }}.mp4
+          if-no-files-found: error
+          retention-days: 2
+
+  assemble:
+    name: Assemble final 16:9 documentary
+    needs: [prepare, render_parts]
+    if: needs.prepare.outputs.mode == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ww2-part-*
+          path: renders/parts
+          merge-multiple: true
+      - name: Join all segments
+        run: |
+          mkdir -p renders
+          : > renders/concat.txt
+          while IFS= read -r f; do
+            printf "file '%s'\n" "$f" >> renders/concat.txt
+          done < <(find renders/parts -type f -name 'part-*.mp4' | sort -V)
+          test -s renders/concat.txt
+          ffmpeg -hide_banner -y -f concat -safe 0 -i renders/concat.txt \
+            -c copy -movflags +faststart renders/WW2-Documentary-1080p.mp4
+          ffprobe -v error -show_entries format=duration,size \
+            -of default=noprint_wrappers=1 renders/WW2-Documentary-1080p.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WW2-Documentary-1080p
+          path: renders/WW2-Documentary-1080p.mp4
+          if-no-files-found: error
+          retention-days: 7
