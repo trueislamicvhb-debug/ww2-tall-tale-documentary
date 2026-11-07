@@ -1,0 +1,4 @@
+numpy
+scipy
+kokoro-onnx
+faster-whisper
